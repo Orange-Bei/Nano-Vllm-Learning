@@ -126,7 +126,9 @@ class ModelRunner:
         block_tables = torch.tensor(block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         return block_tables
 
-    def prepare_prefill(self, seqs: list[Sequence]):
+    def prepare_prefill(self, seqs: list[Sequence]): 
+        # 准备prefill阶段的输入数据，包括input_ids、positions、cu_seqlens_q、cu_seqlens_k、slot_mapping和block_tables等，并将它们放到GPU上；
+        # 其中input_ids和positions是模型的输入，cu_seqlens_q和cu_seqlens_k分别表示每个序列在当前batch中需要生成的token数量和总的token数量，slot_mapping表示每个输入token在kvcache中的位置，block_tables表示每个序列使用的块表
         input_ids = []
         positions = []
         cu_seqlens_q = [0]
@@ -171,6 +173,8 @@ class ModelRunner:
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):
+        # 准备decode阶段的输入数据，包括input_ids、positions、slot_mapping和block_tables等，并将它们放到GPU上；
+        # 其中input_ids和positions是模型的输入，slot_mapping表示每个输入token在kvcache中的位置，block_tables表示每个序列使用的块表
         input_ids = []
         positions = []
         slot_mapping = []
@@ -215,7 +219,7 @@ class ModelRunner:
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
-        logits = self.run_model(input_ids, positions, is_prefill)
+        logits = self.run_model(input_ids, positions, is_prefill) # 调用模型前向计算得到logits，如果是prefill阶段，则输入是一个batch的token ids和对应的位置；如果是decode阶段，则输入是每条序列的最后一个token id和对应的位置
         token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
         reset_context() # 清空上下文，避免对下一批次产生影响
         return token_ids
