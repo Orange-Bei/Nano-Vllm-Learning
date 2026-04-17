@@ -1,9 +1,9 @@
 import atexit
 from dataclasses import fields
 from time import perf_counter
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm # 进度条库，用于显示生成进度和速度
 from transformers import AutoTokenizer
-import torch.multiprocessing as mp
+import torch.multiprocessing as mp # 多进程库，用于在多GPU环境下启动多个模型runner进程
 
 from nanovllm.config import Config
 from nanovllm.sampling_params import SamplingParams
@@ -48,9 +48,9 @@ class LLMEngine:
 
     def step(self):
         seqs, is_prefill = self.scheduler.schedule()
-        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
-        token_ids = self.model_runner.call("run", seqs, is_prefill)
-        self.scheduler.postprocess(seqs, token_ids, is_prefill)
+        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs) # 如果是prefill阶段，则统计本次总的token数量；如果是decode阶段，则统计本次的序列数量（每条序列decode一个token）
+        token_ids = self.model_runner.call("run", seqs, is_prefill) # 调用model runner执行当前的batch，得到生成的token ids
+        self.scheduler.postprocess(seqs, token_ids, is_prefill) # 根据生成的token ids更新对应的序列状态，并判断是否结束
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
         return outputs, num_tokens
 
@@ -77,7 +77,7 @@ class LLMEngine:
                 prefill_throughput = num_tokens / (perf_counter() - t)
             else:
                 decode_throughput = -num_tokens / (perf_counter() - t)
-            pbar.set_postfix({
+            pbar.set_postfix({ # 显示当前的prefill和decode速度
                 "Prefill": f"{int(prefill_throughput)}tok/s",
                 "Decode": f"{int(decode_throughput)}tok/s",
             })
@@ -85,6 +85,6 @@ class LLMEngine:
                 outputs[seq_id] = token_ids
                 pbar.update(1)
         pbar.close()
-        outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
-        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs]
+        outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())] # 按照请求的顺序返回生成的token ids列表
+        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs] # 将生成的token ids解码成文本，并返回文本和token ids的列表
         return outputs

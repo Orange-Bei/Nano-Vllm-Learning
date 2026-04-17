@@ -30,7 +30,7 @@ class ModelRunner:
         torch.set_default_device("cuda")
         self.model = Qwen3ForCausalLM(hf_config)
         load_model(self.model, config.model)
-        self.sampler = Sampler()
+        self.sampler = Sampler() # 采样器模块，负责根据模型输出的logits和温度参数采样生成下一个token id
         self.warmup_model()
         self.allocate_kv_cache()
         if not self.enforce_eager:
@@ -65,7 +65,7 @@ class ModelRunner:
             if method_name == "exit":
                 break
 
-    def read_shm(self):
+    def read_shm(self): # 如果是rank > 0，则通过共享内存等待rank 0传递方法名和参数，并返回给调用者，如果是rank 0，则直接调用对应的方法
         assert self.world_size > 1 and self.rank > 0
         self.event.wait()
         n = int.from_bytes(self.shm.buf[0:4], "little")
@@ -73,7 +73,7 @@ class ModelRunner:
         self.event.clear()
         return method_name, args
 
-    def write_shm(self, method_name, *args):
+    def write_shm(self, method_name, *args): # 如果是rank 0，则通过共享内存将方法名和参数传递给其他rank
         assert self.world_size > 1 and self.rank == 0
         data = pickle.dumps([method_name, *args])
         n = len(data)
@@ -82,7 +82,7 @@ class ModelRunner:
         for event in self.event:
             event.set()
 
-    def call(self, method_name, *args):
+    def call(self, method_name, *args): # 如果是rank 0，则通过共享内存将方法名和参数传递给其他rank；如果是其他rank，则直接调用对应的方法
         if self.world_size > 1 and self.rank == 0:
             self.write_shm(method_name, *args)
         method = getattr(self, method_name, None)
@@ -217,7 +217,7 @@ class ModelRunner:
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill)
         token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
-        reset_context()
+        reset_context() # 清空上下文，避免对下一批次产生影响
         return token_ids
 
     @torch.inference_mode()
