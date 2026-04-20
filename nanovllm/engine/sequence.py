@@ -26,7 +26,7 @@ class Sequence:
         self.num_scheduled_tokens = 0
         self.block_table = []
         self.temperature = sampling_params.temperature
-        self.max_tokens = sampling_params.max_tokens
+        self.max_tokens = sampling_params.max_tokens # 生成的token数量达到max_tokens时就结束
         self.ignore_eos = sampling_params.ignore_eos
 
     def __len__(self):
@@ -41,7 +41,7 @@ class Sequence:
 
     @property
     def num_completion_tokens(self):
-        return self.num_tokens - self.num_prompt_tokens
+        return self.num_tokens - self.num_prompt_tokens # 已经生成的token数量=总的token数量-提示词token数量
 
     @property
     def prompt_token_ids(self):
@@ -57,10 +57,10 @@ class Sequence:
 
     @property
     def last_block_num_tokens(self):
-        return self.num_tokens - (self.num_blocks - 1) * self.block_size
+        return self.num_tokens - (self.num_blocks - 1) * self.block_size 
 
     def block(self, i):
-        assert 0 <= i < self.num_blocks
+        assert 0 <= i < self.num_blocks # 返回第i块的token ids，如果是最后一块则返回剩余的token ids，否则返回block_size个token ids
         return self.token_ids[i*self.block_size: (i+1)*self.block_size]
 
     def append_token(self, token_id: int):
