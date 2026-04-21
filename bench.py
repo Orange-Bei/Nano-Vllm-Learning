@@ -33,7 +33,8 @@ def main():
     metrics = llm.get_aggregate_metrics()
     print(metrics.summary_table())
 
-    json_path = "bench_metrics.json"
+    json_path = "temp/bench-runs/bench_metrics.json"
+    os.makedirs(os.path.dirname(json_path), exist_ok=True)
     with open(json_path, "w") as f:
         json.dump(metrics.to_dict(), f, indent=2)
     print(f"\nRaw metrics exported to {json_path}")
