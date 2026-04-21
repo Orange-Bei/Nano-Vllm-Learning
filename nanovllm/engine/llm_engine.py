@@ -21,24 +21,24 @@ class LLMEngine:
         Sequence.block_size = config.kvcache_block_size
         self.ps = []
         self.events = []
-        ctx = mp.get_context("spawn")
-        for i in range(1, config.tensor_parallel_size):
+        ctx = mp.get_context("spawn") # 使用spawn方式启动子进程，避免fork带来的问题
+        for i in range(1, config.tensor_parallel_size): # 启动tensor parallel的子进程，rank 0的模型推理在主进程中执行
             event = ctx.Event()
             process = ctx.Process(target=ModelRunner, args=(config, i, event))
             process.start()
             self.ps.append(process)
             self.events.append(event)
-        self.model_runner = ModelRunner(config, 0, self.events)
+        self.model_runner = ModelRunner(config, 0, self.events) # 主进程也启动一个model runner，负责rank 0的模型推理
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
         self.scheduler = Scheduler(config)
-        atexit.register(self.exit)
+        atexit.register(self.exit) # 保证 Python 退出时无论正常结束还是异常都会清理子进程和共享内存。
 
     def exit(self):
-        self.model_runner.call("exit")
-        del self.model_runner
+        self.model_runner.call("exit") # 触发子 rank 跳出 loop，退出进程
+        del self.model_runner # rank 0 自己 exit
         for p in self.ps:
-            p.join()
+            p.join() # 等子进程退出
 
     def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
         if isinstance(prompt, str):
