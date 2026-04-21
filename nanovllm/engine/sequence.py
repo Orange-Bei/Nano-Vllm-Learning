@@ -28,6 +28,13 @@ class Sequence:
         self.temperature = sampling_params.temperature
         self.max_tokens = sampling_params.max_tokens # 生成的token数量达到max_tokens时就结束
         self.ignore_eos = sampling_params.ignore_eos
+        # --- metrics 字段（不参与 __getstate__，不进入 TP worker IPC）---
+        self.arrival_time: float | None = None
+        self.first_scheduled_time: float | None = None
+        self.first_token_time: float | None = None
+        self.finish_time: float | None = None
+        self.token_times: list[float] = []
+        self.preemption_count: int = 0
 
     def __len__(self):
         return self.num_tokens
@@ -80,3 +87,16 @@ class Sequence:
         else:
             self.token_ids = []
             self.last_token = last_state
+
+    def as_request_metrics(self):
+        from nanovllm.engine.metrics import RequestMetrics
+        return RequestMetrics(
+            arrival_time=self.arrival_time,
+            first_scheduled_time=self.first_scheduled_time,
+            first_token_time=self.first_token_time,
+            finish_time=self.finish_time,
+            token_times=list(self.token_times),
+            num_prompt_tokens=self.num_prompt_tokens,
+            num_completion_tokens=self.num_completion_tokens,
+            preemption_count=self.preemption_count,
+        )

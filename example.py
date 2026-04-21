@@ -27,6 +27,11 @@ def main():
         print("\n")
         print(f"Prompt: {prompt!r}")
         print(f"Completion: {output['text']!r}")
+        m = output["metrics"]
+        print(f"Metrics: TTFT={m.ttft*1000:.1f}ms, "
+              f"TPOT={m.tpot*1000:.2f}ms/tok, "
+              f"E2E={m.e2e_latency:.2f}s, "
+              f"tokens={m.num_completion_tokens}")
 
 
 if __name__ == "__main__":

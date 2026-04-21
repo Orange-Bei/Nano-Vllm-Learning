@@ -10,6 +10,7 @@ from nanovllm.sampling_params import SamplingParams
 from nanovllm.engine.sequence import Sequence
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.engine.metrics import EngineMetrics, MetricsCollector
 
 
 class LLMEngine:
@@ -31,7 +32,8 @@ class LLMEngine:
         self.model_runner = ModelRunner(config, 0, self.events) # 主进程也启动一个model runner，负责rank 0的模型推理
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
-        self.scheduler = Scheduler(config)
+        self.metrics = MetricsCollector()
+        self.scheduler = Scheduler(config, self.metrics)
         atexit.register(self.exit) # 保证 Python 退出时无论正常结束还是异常都会清理子进程和共享内存。
 
     def exit(self):
@@ -44,15 +46,28 @@ class LLMEngine:
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         seq = Sequence(prompt, sampling_params)
+        seq.arrival_time = perf_counter()
         self.scheduler.add(seq)
 
     def step(self):
+        t0 = perf_counter()
         seqs, is_prefill = self.scheduler.schedule()
-        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs) # 如果是prefill阶段，则统计本次总的token数量；如果是decode阶段，则统计本次的序列数量（每条序列decode一个token）
+        # postprocess 会把 num_scheduled_tokens 清零，所以 prefill 批 token 数要先 snapshot
+        num_batched = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else len(seqs)
+        num_tokens = num_batched if is_prefill else -len(seqs) # 如果是prefill阶段，则统计本次总的token数量；如果是decode阶段，则统计本次的序列数量（每条序列decode一个token）
         token_ids = self.model_runner.call("run", seqs, is_prefill) # 调用model runner执行当前的batch，得到生成的token ids
         self.scheduler.postprocess(seqs, token_ids, is_prefill) # 根据生成的token ids更新对应的序列状态，并判断是否结束
+        t1 = perf_counter()
+        self.metrics.record_step(t0, t1, seqs, is_prefill, self.scheduler.block_manager, num_batched)
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
         return outputs, num_tokens
+
+    def get_aggregate_metrics(self) -> EngineMetrics:
+        return self.metrics.build()
+
+    def reset_metrics(self):
+        self.metrics = MetricsCollector()
+        self.scheduler.metrics = self.metrics
 
     def is_finished(self):
         return self.scheduler.is_finished()
@@ -85,6 +100,13 @@ class LLMEngine:
                 outputs[seq_id] = token_ids
                 pbar.update(1)
         pbar.close()
-        outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())] # 按照请求的顺序返回生成的token ids列表
-        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids} for token_ids in outputs] # 将生成的token ids解码成文本，并返回文本和token ids的列表
-        return outputs
+        sorted_ids = sorted(outputs.keys())
+        result = []
+        for seq_id in sorted_ids:
+            token_ids = outputs[seq_id]
+            result.append({
+                "text": self.tokenizer.decode(token_ids),
+                "token_ids": token_ids,
+                "metrics": self.metrics.get_request_metrics(seq_id),
+            })
+        return result
