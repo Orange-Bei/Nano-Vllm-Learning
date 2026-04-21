@@ -33,11 +33,11 @@ class VocabParallelEmbedding(nn.Module):
 
     def forward(self, x: torch.Tensor):
         if self.tp_size > 1:
-            mask = (x >= self.vocab_start_idx) & (x < self.vocab_end_idx)
-            x = mask * (x - self.vocab_start_idx)
-        y = F.embedding(x, self.weight)
+            mask = (x >= self.vocab_start_idx) & (x < self.vocab_end_idx) # 这个mask用于标记输入的token ids中哪些在当前分区的词汇范围内；对于在当前分区范围内的token ids，mask对应位置为True，否则为False；这个mask将用于后续的计算，确保只有当前分区负责处理的token ids被映射到嵌入向量，而其他分区的token ids将被忽略。
+            x = mask * (x - self.vocab_start_idx) # 将输入的token ids转换为当前分区的局部索引；对于在当前分区范围内的token ids，减去vocab_start_idx将它们映射到0到num_embeddings_per_partition-1的范围内；对于不在当前分区范围内的token ids，mask对应位置为False，乘以0后会被置为0，这样在后续的embedding计算中就不会对这些token ids产生影响。
+        y = F.embedding(x, self.weight) # 根据输入的token ids和当前分区的嵌入权重计算嵌入向量；对于在当前分区范围内的token ids，embedding函数会根据局部索引从self.weight中查找对应的嵌入向量；对于不在当前分区范围内的token ids，由于它们被置为0，embedding函数会返回一个全零的嵌入向量；这样就实现了词汇表并行化，每个分区只负责处理自己范围内的token ids。
         if self.tp_size > 1:
-            y = mask.unsqueeze(1) * y
+            y = mask.unsqueeze(1) * y # 将mask扩展到嵌入向量的维度，以便在后续的all_reduce操作中正确地聚合来自不同分区的嵌入向量；对于在当前分区范围内的token ids，mask对应位置为True，乘以嵌入向量后保持不变；对于不在当前分区范围内的token ids，mask对应位置为False，乘以嵌入向量后会被置为全零，这样在后续的all_reduce操作中就不会对这些token ids产生影响。
             dist.all_reduce(y)
         return y
 

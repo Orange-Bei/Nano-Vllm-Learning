@@ -2,7 +2,7 @@ from functools import lru_cache
 import torch
 from torch import nn
 
-
+#让 attention 正确地理解相对距离，并且代价小（每个 token 只在进 attention前做一次 2D 旋转）、外推稳（低频维度承载长距离信息）、与 KV cache 完美兼容（存进去的 K 是旋转后的）。
 def apply_rotary_emb(
     x: torch.Tensor,
     cos: torch.Tensor,

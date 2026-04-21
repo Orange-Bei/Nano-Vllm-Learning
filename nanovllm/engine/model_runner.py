@@ -23,7 +23,7 @@ class ModelRunner:
         self.rank = rank
         self.event = event
 
-        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
+        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank) # 初始化分布式环境，使用nccl后端和tcp通信方式，指定总的进程数和当前进程的rank
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.dtype)
@@ -84,9 +84,9 @@ class ModelRunner:
 
     def call(self, method_name, *args): # 如果是rank 0，则通过共享内存将方法名和参数传递给其他rank；如果是其他rank，则直接调用对应的方法
         if self.world_size > 1 and self.rank == 0:
-            self.write_shm(method_name, *args)
+            self.write_shm(method_name, *args) # rank 0 先广播方法名和参数，然后再调用对应的方法
         method = getattr(self, method_name, None)
-        return method(*args)
+        return method(*args) # 所有 rank 各自本地执行对应的方法，rank 0 的方法会在广播后执行，其他 rank 的方法会在接收到广播后执行
 
     def warmup_model(self):
         torch.cuda.empty_cache()
