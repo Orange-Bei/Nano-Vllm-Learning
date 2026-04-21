@@ -41,9 +41,6 @@ class Scheduler:
             remaining = self.max_num_batched_tokens - num_batched_tokens # 计算本次调度还剩余的token预算
             if remaining == 0 or (not seq.block_table and not self.block_manager.can_allocate(seq)):    # no budget
                 break
-            if remaining < num_tokens and scheduled_seqs:    # 如果剩余的token预算不足以满足该序列的prefill需求，并且已经有其他序列被选中进行prefill了，那么就先不选中该序列，等待下一次调度时再尝试prefill；
-                # only allow chunked prefill for the first seq
-                break
             if not seq.block_table: # 如果该序列之前没有prefill过，那么先尝试分配块，如果分配失败则跳过该序列，等待下一次调度时再尝试prefill；如果分配成功或者该序列之前已经prefill过了，那么就选中该序列进行prefill
                 self.block_manager.allocate(seq)
             if seq.first_scheduled_time is None:
