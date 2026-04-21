@@ -26,6 +26,9 @@ class Sequence:
         self.num_scheduled_tokens = 0
         self.block_table = []
         self.temperature = sampling_params.temperature
+        self.top_k = sampling_params.top_k
+        self.top_p = sampling_params.top_p
+        self.repetition_penalty = sampling_params.repetition_penalty
         self.max_tokens = sampling_params.max_tokens # 生成的token数量达到max_tokens时就结束
         self.ignore_eos = sampling_params.ignore_eos
         # --- metrics 字段（不参与 __getstate__，不进入 TP worker IPC）---

@@ -7,7 +7,7 @@ from multiprocessing.shared_memory import SharedMemory
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
-from nanovllm.layers.sampler import Sampler
+from nanovllm.layers.sampler import Sampler, apply_repetition_penalty
 from nanovllm.utils.context import set_context, get_context, reset_context
 from nanovllm.utils.loader import load_model
 
@@ -193,9 +193,19 @@ class ModelRunner:
         return input_ids, positions
 
     def prepare_sample(self, seqs: list[Sequence]):
-        temperatures = [seq.temperature for seq in seqs]
-        temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
-        return temperatures
+        temperatures = torch.tensor(
+            [seq.temperature for seq in seqs],
+            dtype=torch.float32, pin_memory=True,
+        ).cuda(non_blocking=True)
+        top_k = torch.tensor(
+            [seq.top_k for seq in seqs],
+            dtype=torch.int64, pin_memory=True,   # int64：Sampler 内部 gather 要求 LongTensor index
+        ).cuda(non_blocking=True)
+        top_p = torch.tensor(
+            [seq.top_p for seq in seqs],
+            dtype=torch.float32, pin_memory=True,
+        ).cuda(non_blocking=True)
+        return temperatures, top_k, top_p
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
@@ -216,12 +226,19 @@ class ModelRunner:
             graph.replay()
             return self.model.compute_logits(graph_vars["outputs"][:bs])
 
+    @torch.inference_mode()
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
-        logits = self.run_model(input_ids, positions, is_prefill) # 调用模型前向计算得到logits，如果是prefill阶段，则输入是一个batch的token ids和对应的位置；如果是decode阶段，则输入是每条序列的最后一个token id和对应的位置
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
-        reset_context() # 清空上下文，避免对下一批次产生影响
+        sample_inputs = self.prepare_sample(seqs) if self.rank == 0 else None
+        logits = self.run_model(input_ids, positions, is_prefill)
+        if self.rank == 0:
+            # 两阶段采样：先 eager Python 应用 ragged 的 repetition_penalty，
+            # 再调 @torch.compile 的 Sampler 做 top_k / top_p / temperature / greedy-or-Gumbel
+            apply_repetition_penalty(logits, seqs)
+            token_ids = self.sampler(logits, *sample_inputs).tolist()
+        else:
+            token_ids = None
+        reset_context()
         return token_ids
 
     @torch.inference_mode()

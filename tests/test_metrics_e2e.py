@@ -1,6 +1,6 @@
 """端到端冒烟测试：需要 GPU 和 Qwen3-0.6B 模型。
 
-如果模型路径不存在则自动跳过。
+如果模型路径不存在则自动跳过。llm fixture 在 conftest.py 中定义（session 级共享）。
 """
 import os
 import pytest
@@ -10,13 +10,6 @@ pytestmark = pytest.mark.skipif(
     not os.path.isdir(MODEL_PATH),
     reason=f"Test model not found at {MODEL_PATH}",
 )
-
-
-@pytest.fixture(scope="module")
-def llm():
-    from nanovllm import LLM
-    return LLM(MODEL_PATH, enforce_eager=True, max_model_len=1024,
-               tensor_parallel_size=1)
 
 
 def test_per_request_metrics_monotonicity(llm):

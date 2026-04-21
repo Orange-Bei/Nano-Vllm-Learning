@@ -37,6 +37,9 @@ class LLMEngine:
         atexit.register(self.exit) # 保证 Python 退出时无论正常结束还是异常都会清理子进程和共享内存。
 
     def exit(self):
+        # 幂等：显式调用过一次后，atexit 再触发不应报错
+        if not hasattr(self, "model_runner"):
+            return
         self.model_runner.call("exit") # 触发子 rank 跳出 loop，退出进程
         del self.model_runner # rank 0 自己 exit
         for p in self.ps:
