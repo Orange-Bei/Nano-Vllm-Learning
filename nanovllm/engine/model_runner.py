@@ -1,3 +1,4 @@
+import os
 import pickle
 import torch
 import torch.distributed as dist
@@ -23,7 +24,8 @@ class ModelRunner:
         self.rank = rank
         self.event = event
 
-        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank) # 初始化分布式环境，使用nccl后端和tcp通信方式，指定总的进程数和当前进程的rank
+        _dist_port = os.environ.get("NANO_VLLM_DIST_PORT", "2333")
+        dist.init_process_group("nccl", f"tcp://localhost:{_dist_port}", world_size=self.world_size, rank=rank) # 初始化分布式环境，使用nccl后端和tcp通信方式，指定总的进程数和当前进程的rank
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.dtype)

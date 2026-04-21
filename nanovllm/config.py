@@ -11,6 +11,7 @@ class Config:
     max_model_len: int = 4096
     gpu_memory_utilization: float = 0.9
     tensor_parallel_size: int = 1
+    data_parallel_size: int = 1
     enforce_eager: bool = False
     hf_config: AutoConfig | None = None
     eos: int = -1
@@ -21,5 +22,12 @@ class Config:
         assert os.path.isdir(self.model)
         assert self.kvcache_block_size % 256 == 0
         assert 1 <= self.tensor_parallel_size <= 8
+        assert self.data_parallel_size >= 1
+        assert not (self.tensor_parallel_size > 1 and self.data_parallel_size > 1), \
+            "DP × TP 暂不支持（本次 spec 非目标）"
+        if self.data_parallel_size > 1:
+            import torch
+            assert self.data_parallel_size <= torch.cuda.device_count(), \
+                f"data_parallel_size={self.data_parallel_size} > 可用 GPU 数 {torch.cuda.device_count()}"
         self.hf_config = AutoConfig.from_pretrained(self.model)
         self.max_model_len = min(self.max_model_len, self.hf_config.max_position_embeddings)
