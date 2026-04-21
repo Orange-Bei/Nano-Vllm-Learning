@@ -88,7 +88,7 @@ class ModelRunner:
         method = getattr(self, method_name, None)
         return method(*args) # 所有 rank 各自本地执行对应的方法，rank 0 的方法会在广播后执行，其他 rank 的方法会在接收到广播后执行
 
-    def warmup_model(self):
+    def warmup_model(self): #  用假数据跑一次最大 batch 的 prefill，让 PyTorch 把所有中间 buffer 的峰值显存用出来（reset_peak_memory_stats 后记录）。目的是"知道除了 KV cache 之外还要预留多少显存"。 后续正式推理时，如果发现显存不足，就可以直接报错，而不是等到跑一会儿才发现显存不足。
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         max_num_batched_tokens, max_model_len = self.config.max_num_batched_tokens, self.config.max_model_len
@@ -104,13 +104,13 @@ class ModelRunner:
         config = self.config
         hf_config = config.hf_config
         free, total = torch.cuda.mem_get_info()
-        used = total - free
-        peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
-        current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
+        used = total - free # 加载权重和模型 warmup 后实际使用的显存
+        peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"] # warmup 过程中显存使用的峰值，包含了激活/临时 buffer 的峰值
+        current = torch.cuda.memory_stats()["allocated_bytes.all.current"]# 当前显存使用量，理论上应该和 used 接近，如果 current 比 used 大很多，说明模型加载后还有大量的显存被激活/临时 buffer 占用，这部分显存也必须预留出来，否则正式推理时可能会因为显存不足而崩溃。
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.dtype.itemsize
-        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
+        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes # peak - current 这个差值 ≈ 激活/临时 buffer 的峰值，必须预留。
         assert config.num_kvcache_blocks > 0
         self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)
         layer_id = 0
